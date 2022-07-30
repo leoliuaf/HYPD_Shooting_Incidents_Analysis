@@ -1,0 +1,173 @@
+---
+title: "NYPD Shooting Incidents Analysis"
+date: "7/30/2022"
+output: pdf_document
+---
+
+# Setup
+
+```{r setup,  warning=FALSE, message=FALSE}
+library("tidyverse")
+library("lubridate")
+```
+
+# Retrieving NYPD Shooting Incidents Data
+
+```{r import_data, message = FALSE}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+shooting_data <- read_csv(url_in)
+```
+
+
+```{r explore_data}
+# Explore data
+head(shooting_data)
+shooting_data %>% summary()
+shooting_data %>% distinct(BORO)
+shooting_data %>% distinct(STATISTICAL_MURDER_FLAG)
+shooting_data %>% group_by(VIC_AGE_GROUP) %>% 
+  summarize(count = n()) %>%
+  mutate(percentage = 100 * round(count / sum(count), 3))
+```
+
+After exploring the data, I found some records have unknown VIC_AGE_GROUP. I will simply remove them since they only account for 0.2% of records. In addition, I will remove all fields other than INCIDENT_KEY, OCCUR_DATE, BORO, STATISTICAL_MURDER_FLAG, VIC_AGE_GROUP. I will also convert OCCUR_DATE, OCCUR_TIME to date type.
+
+
+```{r data_wrangling}
+# Cleansing data
+shooting_data_cleaned <- shooting_data %>% select(c(INCIDENT_KEY, OCCUR_DATE, OCCUR_TIME,
+                                                    BORO, STATISTICAL_MURDER_FLAG, 
+                                                    VIC_AGE_GROUP)) %>% 
+    mutate(OCCUR_DATE = mdy(OCCUR_DATE), OCCUR_TIME = hms(OCCUR_TIME)) %>%
+    filter(VIC_AGE_GROUP != "UNKNOWN")
+```
+
+
+# Visualization
+
+First, I will explore how number of incidents change over time. Each record represents a victim in our dataset and it is possible to have duplicate INCIDENT_KEY since an incident can have multiple victims. Thus, we need to remove duplicated INCIDENT_KEY.
+
+```{r fig1}
+shooting_data_cleaned %>% mutate(occur_year = year(OCCUR_DATE)) %>% 
+    group_by(occur_year) %>% 
+    summarize(incidents = n_distinct(INCIDENT_KEY)) %>% 
+    ungroup() %>% 
+    ggplot(aes(x=occur_year, y = incidents)) +
+    geom_bar(stat="identity") +
+    labs(title = "NYPD Shootings Incidents (Figure 1)", y = NULL)
+```
+
+Figure 1 illustrates number of incidents dropped in 2012 and then reached its minimum in 2018. It rises drastically in 2020 and grew steadily in 2020 and 2021. The rise in 2020 is potentially due to the social impact of pandemic outbreak.
+
+Next, I will introduce two new variables: murder rate (incidents), murder rate (victims). The first one represents percentage of incidents have victim(s) murdered. The other one represents percentage of victims murdered. 
+
+```{r fig2}
+shooting_data_cleaned %>% group_by(INCIDENT_KEY)%>%
+  mutate(murder_flag = max(STATISTICAL_MURDER_FLAG)) %>%
+  ungroup() %>%
+  distinct(INCIDENT_KEY, .keep_all = TRUE) %>%
+  mutate(occur_year = year(OCCUR_DATE)) %>% 
+  group_by(occur_year) %>% 
+  summarize(incidents = n(), incidents_murder = sum(murder_flag)) %>% 
+  ungroup() %>%
+  filter(incidents > 0) %>%
+  mutate(murder_rate = incidents_murder/ incidents * 100) %>%
+  ggplot(aes(x=occur_year, y=murder_rate)) +
+  geom_line() +
+  scale_y_continuous(limit=c(0,100)) +
+  labs(title = "Murder Rate (Incidents) (Figure 2)", y = NULL)
+```
+
+Figure 2 shows that percentage of fatal shooting incidents has slight fluctuations but overall remains stable at around 23% between 2016 and 2021. Murder rate (incidents) remains stable although number of shooting incidents fluctuates; thus, it can be concluded that number of incidents is positively correlated with number of fatal shooting incidents in New York.
+
+
+```{r fig3, message = FALSE}
+shooting_data_cleaned %>% mutate(occur_year = year(OCCUR_DATE)) %>%
+    group_by(INCIDENT_KEY) %>%
+    mutate(murder_flag = max(STATISTICAL_MURDER_FLAG)) %>%
+    ungroup() %>%
+    distinct(INCIDENT_KEY, .keep_all = TRUE) %>%
+    group_by(occur_year, BORO) %>%
+    summarize(incidents = n(), fatal_incidents = sum(murder_flag)) %>% 
+    ungroup() %>% 
+    mutate(non_fatal_incidents = incidents - fatal_incidents) %>%
+    pivot_longer(cols = c(non_fatal_incidents, fatal_incidents), names_to = "Murder_Flag", 
+                 values_to = "Number_of_Incidents") %>%
+    ggplot(aes(x = occur_year, y = Number_of_Incidents, fill = Murder_Flag)) +
+        geom_bar(stat = "Identity", position = "dodge") +
+        scale_fill_discrete(labels = c("fatal", "non-fatal")) +
+        labs(title = "Yearly NYPD Shooting Incidents across Boroughs (Figure 3)", y = NULL) +
+        facet_wrap(facets=vars(BORO))
+```
+The bar charts illustrate that number of shooting incidents rise in 2020 across all boroughs except Staten Island. Brooklyn has the highest number of occurrence while Staten Island has the lowest. Next, I will focus on shooting incidents occurred in Brooklyn and explore the time period that shooting incidents occurred most frequently.
+
+```{r fig4}
+shooting_data_cleaned %>% filter(BORO == "BROOKLYN") %>%
+    mutate(occur_year = year(OCCUR_DATE), occur_hour = hour(OCCUR_TIME)) %>%
+    group_by(INCIDENT_KEY) %>%
+    mutate(murder_flag = max(STATISTICAL_MURDER_FLAG)) %>%
+    ungroup() %>%
+    distinct(INCIDENT_KEY, .keep_all = TRUE) %>%
+    group_by(occur_year, occur_hour) %>%
+    summarize(incidents = n(), fatal_incidents = sum(murder_flag)) %>%
+    ungroup() %>%
+    filter(incidents > 0) %>%
+    ggplot(aes(x=occur_hour, y=incidents)) +
+        geom_line() +
+        labs(title = "Brooklyn Shooting Incidents (Figure 4)", y = NULL) +
+        facet_wrap(facets = vars(occur_year))
+```
+Shooting incidents are more likely to occur at dawn (12:01 to 3:00 a.m.) and night (after 8:00 p.m.) in Brooklyn. It is less likely to occur between 5:00 to 10:00 a.m. Potential reasons could be dawn/night times are more silent and people tends to be more aggressive at night.
+
+Next, let's discover if there is a relationship between murder rate (victims) and and age of victims.
+
+```{r fig5, message = FALSE}
+shooting_data_cleaned %>% mutate(occur_year = year(OCCUR_DATE)) %>%
+  group_by(VIC_AGE_GROUP, occur_year) %>%
+  summarize(victims = n(), victims_murder = sum(STATISTICAL_MURDER_FLAG)) %>%
+  ungroup() %>%
+  filter(victims > 0) %>%
+  mutate(murder_rate_victim = victims_murder/victims) %>%
+  ggplot(aes(x= occur_year, y = murder_rate_victim)) +
+  geom_line() +
+  facet_wrap(facets = vars(VIC_AGE_GROUP)) +
+  labs(title = "Murder Rate across Different Age Groups (Figure 5)", y = NULL)
+```
+
+```{r age_group_summary}
+shooting_data_cleaned %>% mutate(occur_year = year(OCCUR_DATE)) %>%
+  group_by(VIC_AGE_GROUP) %>%
+  summarize(victims = n(), murdered = sum(STATISTICAL_MURDER_FLAG)) %>%
+  ungroup()
+```
+
+The group of charts illustrates that senior victims have a higher murder rate. A potential reason is that senior people are more vulnerable. Murder rate of people aged 65+ fluctuates but it is probably because there are much less victims in this group and data is more sensitive.
+
+# Modeling
+
+```{r model}
+shooting_data_cleaned_sample <- shooting_data_cleaned %>% group_by(INCIDENT_KEY) %>%
+    slice_sample(n=1) %>% ungroup()
+mod <- glm(data = shooting_data_cleaned_sample, STATISTICAL_MURDER_FLAG ~ VIC_AGE_GROUP, 
+           family = binomial)
+summary(mod)
+```
+
+Before I build the logistic model, I have sampled one record from each incident to ensure individual independence. Assuming other assumptions of logistic regression are not violated, the results shows that seniors are more likely to be murdered in a shooting incident. Victims older than 65 years old are around five times likely to be murdered in an incident than victims less than 18 years old.
+
+# Conclusions
+We can conclude that the number of shooting incidents reach its minimum in 2018 but rise drastically in 2020 and continued increasing in 2021. Besides, murder rate (incidents) remains its level from 2016 to 2021. Last but not least, age of victims is an important factor of lethality of shooting incidents and senior people are more likely to be murdered in a shooting incident. Victims older than 65 years old are around five times likely to be murdered in an incident than victims less than 18 years old. 
+
+# Source of bias
+Considering the collection method of our dataset is unknown, it may either add bias or harm validity of the logistical model. The assumptions might not meet depends on how data is collected, even though I further sampled the dataset to ensure independence. Human errors and changes on departmental forms is another source bias. Some data and information are missing or potentially incorrect. During data cleansing process, I removed all unknown VICTIM_AGE_GROUP to ensure our result is as accurate as possible.
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
