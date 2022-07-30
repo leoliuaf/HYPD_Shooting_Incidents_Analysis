@@ -159,7 +159,7 @@ Before I build the logistic model, I have sampled one record from each incident 
 We can conclude that the number of shooting incidents reach its minimum in 2018 but rise drastically in 2020 and continued increasing in 2021. Besides, murder rate (incidents) remains its level from 2016 to 2021. Last but not least, age of victims is an important factor of lethality of shooting incidents and senior people are more likely to be murdered in a shooting incident. Victims older than 65 years old are around five times likely to be murdered in an incident than victims less than 18 years old. 
 
 # Source of bias
-Considering the collection method of our dataset is unknown, it may either add bias or harm validity of the logistical model. The assumptions might not meet depends on how data is collected, even though I further sampled the dataset to ensure independence. Human errors and changes on departmental forms is another source bias. Some data and information are missing or potentially incorrect. During data cleansing process, I removed all unknown VICTIM_AGE_GROUP to ensure our result is as accurate as possible.
+Considering the collection method of our dataset is unknown, it may either add bias or harm validity of the logistic model. The assumptions might not meet depends on how data is collected, even though I further sampled the dataset to ensure independence. Human errors and changes on departmental forms is another source bias. Some data and information are missing or potentially incorrect. During data cleansing process, I removed all unknown VICTIM_AGE_GROUP to ensure our result is as accurate as possible.
 
 ```{r}
 sessionInfo()
